@@ -399,6 +399,9 @@ def main_app():
     # UI
     st.markdown("""
     <style>
+        .block-container {
+            width:90%;
+        }
         .user-info {
             background-color: #f0f2f6; padding: 1rem;
             border-radius: 0.5rem; margin-bottom: 1rem;
