@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import requests
 
 # Google関連のインポートをtry-exceptで囲む
 try:
@@ -26,7 +27,8 @@ def get_config():
         "development_mode": True,  # デフォルトは開発モード
         "sheet_url": "https://docs.google.com/spreadsheets/d/1Ymt2OrvY2dKFs9puCX8My7frS_BS1sg3Yev3BLQm9xQ/edit",
         "has_secrets": False,
-        "has_gcp_account": False
+        "has_gcp_account": False,
+        "has_oauth": False
     }
     
     # Streamlit Secretsの確認
@@ -38,10 +40,72 @@ def get_config():
             # Google Service Accountの確認
             if "gcp_service_account" in st.secrets:
                 config["has_gcp_account"] = True
+            
+            # Google OAuth設定の確認
+            if all(key in st.secrets for key in ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "REDIRECT_URI"]):
+                config["has_oauth"] = True
     except Exception:
         pass
     
     return config
+
+# --- OAuth認証関数 ---
+def get_google_auth_url():
+    """Google OAuth認証URLを生成"""
+    config = get_config()
+    if not config["has_oauth"]:
+        return None
+    
+    client_id = st.secrets["GOOGLE_CLIENT_ID"]
+    redirect_uri = st.secrets["REDIRECT_URI"]
+    scope = "email profile"
+    
+    auth_url = f"https://accounts.google.com/o/oauth2/auth?client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&response_type=code&access_type=offline"
+    return auth_url
+
+def get_google_user_info(code):
+    """認証コードからユーザー情報を取得"""
+    config = get_config()
+    if not config["has_oauth"]:
+        return None
+    
+    try:
+        # アクセストークン取得
+        token_url = "https://oauth2.googleapis.com/token"
+        token_data = {
+            "client_id": st.secrets["GOOGLE_CLIENT_ID"],
+            "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": st.secrets["REDIRECT_URI"]
+        }
+        token_response = requests.post(token_url, data=token_data)
+        token_json = token_response.json()
+        
+        if "access_token" not in token_json:
+            return None
+            
+        # ユーザー情報取得
+        user_info_url = f"https://www.googleapis.com/oauth2/v2/userinfo?access_token={token_json['access_token']}"
+        user_response = requests.get(user_info_url)
+        return user_response.json()
+    except Exception as e:
+        st.error(f"認証エラー: {e}")
+        return None
+
+def check_user_permission(email, df_staff):
+    """ユーザーの権限チェック"""
+    valid_permissions = ["4. 承認者", "3. 利用者・承認者", "2. システム管理者"]
+    user_data = df_staff[
+        (df_staff["ログインID"] == email) & 
+        (df_staff["権限"].isin(valid_permissions))
+    ]
+    
+    if len(user_data) > 0:
+        user_info = user_data.iloc[0]
+        return True, user_info
+    else:
+        return False, None
 
 # --- 認証情報の取得 ---
 @st.cache_resource
@@ -154,6 +218,37 @@ def handle_authentication():
     if st.session_state.authenticated:
         return True
     
+    # OAuth認証の処理
+    query_params = st.experimental_get_query_params()
+    if "code" in query_params and config["has_oauth"]:
+        code = query_params["code"][0]
+        user_info = get_google_user_info(code)
+        
+        if user_info and "email" in user_info:
+            # データ読み込み
+            df_kintai, df_staff = load_spreadsheet_data()
+            if df_staff is not None:
+                has_permission, staff_info = check_user_permission(user_info["email"], df_staff)
+                
+                if has_permission:
+                    # セッション状態設定
+                    st.session_state.authenticated = True
+                    st.session_state.user_info = staff_info.to_dict()
+                    st.session_state.user_email = user_info["email"]
+                    surname = str(staff_info.get('姓', '')).strip()
+                    given_name = str(staff_info.get('名', '')).strip()
+                    st.session_state.user_name = f"{surname}{given_name}"
+                    
+                    # URLパラメータをクリア
+                    st.experimental_set_query_params()
+                    st.rerun()
+                else:
+                    st.error("アクセス権限がありません。権限が設定されているメールアドレスでログインしてください。")
+                    st.stop()
+        else:
+            st.error("認証に失敗しました。")
+            st.stop()
+    
     # ログイン画面
     st.title("勤怠確認チェックツール")
     st.markdown("---")
@@ -168,6 +263,9 @@ def handle_authentication():
     if not config["has_gcp_account"]:
         st.warning("⚠️ Google Service Account が設定されていません")
     
+    if not config["has_oauth"]:
+        st.warning("⚠️ Google OAuth が設定されていません")
+    
     # データ読み込みテスト
     with st.spinner("データ読み込み中..."):
         df_kintai, df_staff = load_spreadsheet_data()
@@ -176,56 +274,80 @@ def handle_authentication():
         st.error("データの読み込みに失敗しました。設定を確認してください。")
         st.stop()
     
-    # 権限のあるユーザーを取得
-    valid_permissions = ["4. 承認者", "3. 利用者・承認者", "2. システム管理者"]
+    # 認証方式の選択
+    st.markdown("### ログイン方式を選択")
     
-    if "権限" not in df_staff.columns:
-        st.error("社員一覧に「権限」列が見つかりません。")
-        st.info("必要な列: ログインID(B列), 社員番号(D列), 姓(E列), 名(F列), 権限(BL列)")
-        st.stop()
+    # OAuth認証が利用可能な場合
+    if config["has_oauth"]:
+        auth_url = get_google_auth_url()
+        if auth_url:
+            st.markdown("#### Google アカウント認証")
+            st.markdown(f"[🔐 Googleアカウントでログイン]({auth_url})")
+            st.markdown("---")
     
-    authorized_users = df_staff[df_staff["権限"].isin(valid_permissions)]
-    
-    if len(authorized_users) == 0:
-        st.error("権限のあるユーザーが見つかりません。")
-        st.info("社員一覧の権限列に以下のいずれかが設定されているユーザーが必要です:")
-        for perm in valid_permissions:
-            st.info(f"- {perm}")
-        st.stop()
-    
-    # ユーザー選択
-    st.markdown("### ログイン")
-    
-    user_options = ["選択してください"]
-    user_data = {}
-    
-    for _, user in authorized_users.iterrows():
-        surname = str(user.get('姓', '')).strip()
-        given_name = str(user.get('名', '')).strip()
-        name = f"{surname}{given_name}" if surname or given_name else "名前なし"
-        login_id = str(user.get('ログインID', '')).strip()
-        permission = str(user.get('権限', '')).strip()
+    # 開発モード: ユーザー選択
+    if config["development_mode"]:
+        st.markdown("#### 開発モード: ユーザー選択")
         
-        display_text = f"{name} ({login_id}) - {permission}"
-        user_options.append(display_text)
-        user_data[display_text] = user.to_dict()
-    
-    selected_user = st.selectbox("ログインするユーザーを選択", user_options)
-    
-    if selected_user != "選択してください":
-        if st.button("ログイン", type="primary"):
-            user_info = user_data[selected_user]
+        # 権限のあるユーザーを取得
+        valid_permissions = ["4. 承認者", "3. 利用者・承認者", "2. システム管理者"]
+        
+        if "権限" not in df_staff.columns:
+            st.error("社員一覧に「権限」列が見つかりません。")
+            st.info("必要な列: ログインID(B列), 社員番号(D列), 姓(E列), 名(F列), 権限(BL列)")
+            st.stop()
+        
+        authorized_users = df_staff[df_staff["権限"].isin(valid_permissions)]
+        
+        if len(authorized_users) == 0:
+            st.error("権限のあるユーザーが見つかりません。")
+            st.info("社員一覧の権限列に以下のいずれかが設定されているユーザーが必要です:")
+            for perm in valid_permissions:
+                st.info(f"- {perm}")
+            st.stop()
+        
+        # ユーザー選択
+        user_options = ["選択してください"]
+        user_data = {}
+        
+        for _, user in authorized_users.iterrows():
+            surname = str(user.get('姓', '')).strip()
+            given_name = str(user.get('名', '')).strip()
+            name = f"{surname}{given_name}" if surname or given_name else "名前なし"
+            login_id = str(user.get('ログインID', '')).strip()
+            permission = str(user.get('権限', '')).strip()
             
-            # セッション状態設定
-            st.session_state.authenticated = True
-            st.session_state.user_info = user_info
-            st.session_state.user_email = user_info.get('ログインID', '')
-            surname = str(user_info.get('姓', '')).strip()
-            given_name = str(user_info.get('名', '')).strip()
-            st.session_state.user_name = f"{surname}{given_name}"
-            
-            st.success("ログインしました！")
-            st.rerun()
+            display_text = f"{name} ({login_id}) - {permission}"
+            user_options.append(display_text)
+            user_data[display_text] = user.to_dict()
+        
+        selected_user = st.selectbox("ログインするユーザーを選択", user_options)
+        
+        if selected_user != "選択してください":
+            if st.button("ログイン", type="primary"):
+                user_info = user_data[selected_user]
+                
+                # セッション状態設定
+                st.session_state.authenticated = True
+                st.session_state.user_info = user_info
+                st.session_state.user_email = user_info.get('ログインID', '')
+                surname = str(user_info.get('姓', '')).strip()
+                given_name = str(user_info.get('名', '')).strip()
+                st.session_state.user_name = f"{surname}{given_name}"
+                
+                st.success("ログインしました！")
+                st.rerun()
+    
+    # 設定ガイド
+    if not config["has_oauth"]:
+        st.markdown("---")
+        st.markdown("#### Google OAuth設定")
+        st.info("本格的なGoogle認証を有効にするには、Streamlit Secretsに以下を追加してください:")
+        st.code("""
+GOOGLE_CLIENT_ID = "your-client-id"
+GOOGLE_CLIENT_SECRET = "your-client-secret"
+REDIRECT_URI = "https://your-app.streamlit.app/"
+        """)
     
     return False
 
@@ -271,6 +393,10 @@ def main_app():
             font-size: 20px; font-weight: bold; padding: 0.5rem;
             display: inline-block; margin-bottom: 1rem;
         }
+        .auth-method {
+            background-color: #e8f4fd; padding: 0.5rem;
+            border-radius: 0.25rem; margin-bottom: 1rem; font-size: 0.9em;
+        }
     </style>
     """, unsafe_allow_html=True)
     
@@ -281,7 +407,12 @@ def main_app():
     with col2:
         if st.button("ログアウト"):
             st.session_state.authenticated = False
+            st.experimental_set_query_params()  # URLパラメータをクリア
             st.rerun()
+    
+    # 認証方法の表示
+    auth_method = "Google OAuth認証" if "code" in st.experimental_get_query_params() else "開発モード"
+    st.markdown(f"<div class='auth-method'>認証方法: {auth_method}</div>", unsafe_allow_html=True)
     
     # ユーザー情報表示
     st.markdown(f"""
