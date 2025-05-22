@@ -4,6 +4,10 @@ import pandas as pd
 import os
 import requests
 
+st.set_page_config(
+    layout="wide"
+)
+
 # Google関連のインポートをtry-exceptで囲む
 try:
     from google.oauth2 import service_account
