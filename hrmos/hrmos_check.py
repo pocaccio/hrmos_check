@@ -219,9 +219,9 @@ def handle_authentication():
         return True
     
     # OAuth認証の処理
-    query_params = st.experimental_get_query_params()
+    query_params = st.query_params
     if "code" in query_params and config["has_oauth"]:
-        code = query_params["code"][0]
+        code = query_params["code"]
         user_info = get_google_user_info(code)
         
         if user_info and "email" in user_info:
@@ -240,7 +240,7 @@ def handle_authentication():
                     st.session_state.user_name = f"{surname}{given_name}"
                     
                     # URLパラメータをクリア
-                    st.experimental_set_query_params()
+                    st.query_params.clear()
                     st.rerun()
                 else:
                     st.error("アクセス権限がありません。権限が設定されているメールアドレスでログインしてください。")
@@ -407,11 +407,11 @@ def main_app():
     with col2:
         if st.button("ログアウト"):
             st.session_state.authenticated = False
-            st.experimental_set_query_params()  # URLパラメータをクリア
+            st.query_params.clear()  # URLパラメータをクリア
             st.rerun()
     
     # 認証方法の表示
-    auth_method = "Google OAuth認証" if "code" in st.experimental_get_query_params() else "開発モード"
+    auth_method = "Google OAuth認証" if "code" in st.query_params else "開発モード"
     st.markdown(f"<div class='auth-method'>認証方法: {auth_method}</div>", unsafe_allow_html=True)
     
     # ユーザー情報表示
