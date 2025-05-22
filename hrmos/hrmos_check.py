@@ -56,11 +56,25 @@ def get_google_auth_url():
     if not config["has_oauth"]:
         return None
     
+    import urllib.parse
+    
     client_id = st.secrets["GOOGLE_CLIENT_ID"]
     redirect_uri = st.secrets["REDIRECT_URI"]
-    scope = "email profile"
     
-    auth_url = f"https://accounts.google.com/o/oauth2/auth?client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&response_type=code&access_type=offline"
+    # OAuth2.0パラメータ
+    params = {
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'scope': 'email profile',
+        'response_type': 'code',
+        'access_type': 'offline',
+        'include_granted_scopes': 'true'
+    }
+    
+    # URLエンコード
+    query_string = urllib.parse.urlencode(params)
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{query_string}"
+    
     return auth_url
 
 def get_google_user_info(code):
