@@ -28,7 +28,7 @@ gspread>=5.0.0
 def get_config():
     """設定情報を取得"""
     config = {
-        "development_mode": True,  # デフォルトは開発モード
+        "development_mode": False,  # デフォルトは開発モード
         "sheet_url": "https://docs.google.com/spreadsheets/d/1Ymt2OrvY2dKFs9puCX8My7frS_BS1sg3Yev3BLQm9xQ/edit",
         "has_secrets": False,
         "has_gcp_account": False,
@@ -317,9 +317,10 @@ def handle_authentication():
             st.caption("↑ボタンが動作しない場合はこちらのリンクをクリックしてください")
             st.markdown("---")
     
-    # 開発モード: ユーザー選択
+    # 開発モード: ユーザー選択（開発モードでのみ表示）
     if config["development_mode"]:
         st.markdown("#### 開発モード: ユーザー選択")
+        st.info("💡 本番環境ではこの選択肢は表示されません")
         
         # 権限のあるユーザーを取得
         valid_permissions = ["4. 承認者", "3. 利用者・承認者", "2. システム管理者"]
