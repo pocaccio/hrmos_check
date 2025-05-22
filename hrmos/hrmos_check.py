@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import os
 import requests
+import time
 
 st.set_page_config(
     layout="wide"
@@ -301,20 +302,36 @@ def handle_authentication():
         if auth_url:
             st.markdown("#### Google アカウント認証")
             
-            # 方法1: ボタンクリックでリダイレクト
+            # 方法1: セッション状態を使用したリダイレクト管理
+            if "redirect_initiated" not in st.session_state:
+                st.session_state.redirect_initiated = False
+            
             if st.button("🔐 Googleアカウントでログイン", type="primary", use_container_width=True):
-                # JavaScriptを使用したリダイレクト
-                redirect_js = f"""
+                st.session_state.redirect_initiated = True
+                st.rerun()
+            
+            # リダイレクトの実行
+            if st.session_state.redirect_initiated:
+                st.info("Googleログイン画面にリダイレクトしています...")
+                # meta refreshを使用したリダイレクト
+                redirect_html = f"""
+                <meta http-equiv="refresh" content="0; url={auth_url}">
                 <script>
                     window.location.href = "{auth_url}";
                 </script>
                 """
-                st.markdown(redirect_js, unsafe_allow_html=True)
-                st.info("Googleログイン画面にリダイレクトしています...")
+                st.markdown(redirect_html, unsafe_allow_html=True)
+                
+                # リダイレクトが失敗した場合のフォールバック
+                time.sleep(2)
+                st.markdown(f"### 自動リダイレクトが動作しない場合は、[こちらをクリック]({auth_url})してください。")
+                st.stop()
             
-            # 方法2: 代替リンク（ボタンが動作しない場合）
-            st.markdown(f"**または**: [こちらをクリック]({auth_url})")
-            st.caption("↑ボタンが動作しない場合はこちらのリンクをクリックしてください")
+            # 方法2: 直接リンク（常に表示）
+            st.markdown("---")
+            st.markdown("**手動でログインする場合:**")
+            st.markdown(f"[Googleアカウントでログインする]({auth_url})")
+            st.caption("↑自動リダイレクトが動作しない場合はこちらをクリックしてください")
             st.markdown("---")
     
     # 開発モード: ユーザー選択（開発モードでのみ表示）
@@ -456,7 +473,10 @@ def main_app():
         st.title("勤怠確認チェックツール")
     with col2:
         if st.button("ログアウト"):
-            st.session_state.authenticated = False
+            # ログアウト時にredirect_initiatedもリセット
+            for key in ['authenticated', 'redirect_initiated']:
+                if key in st.session_state:
+                    del st.session_state[key]
             st.query_params.clear()  # URLパラメータをクリア
             st.rerun()
     
