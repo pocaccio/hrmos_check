@@ -391,22 +391,39 @@ def main_app():
     
     # データ整形
     if "第一承認者" in df_staff.columns:
+        # 社員一覧で姓名を結合した承認者名を作成
+        df_staff_with_fullname = df_staff.copy()
+        df_staff_with_fullname["承認者フルネーム"] = df_staff_with_fullname["姓"].astype(str) + df_staff_with_fullname["名"].astype(str)
+        
+        # 勤怠データとマージ
         merged = pd.merge(df_kintai, df_staff[["社員番号", "第一承認者"]], on="社員番号", how="left")
         merged = merged.rename(columns={"第一承認者": "承認者"})
+        
+        # 承認者フルネーム情報も追加
+        merged = pd.merge(merged, df_staff_with_fullname[["社員番号", "承認者フルネーム"]], on="社員番号", how="left")
     else:
         st.warning("社員一覧に「第一承認者」列が見つかりません。")
         merged = df_kintai.copy()
         merged["承認者"] = ""
+        merged["承認者フルネーム"] = ""
     
     # 権限に基づくフィルタリング
     user_info = st.session_state.user_info
     user_permission = user_info.get("権限", "")
     
+    # 現在ログインしているユーザーのフルネーム
+    current_user_fullname = st.session_state.user_name
+    
     if user_permission == "2. システム管理者":
         filtered = merged.copy()
     elif user_permission in ["4. 承認者", "3. 利用者・承認者"]:
+        # フルネームまたはログインIDで承認対象をフィルタリング
         user_login_id = user_info.get("ログインID", "")
-        filtered = merged[merged["承認者"] == user_login_id]
+        filtered = merged[
+            (merged["承認者"] == user_login_id) |  # ログインIDでの一致
+            (merged["承認者"] == current_user_fullname) |  # フルネームでの一致
+            (merged["承認者フルネーム"] == current_user_fullname)  # 承認者フルネームでの一致
+        ]
     else:
         filtered = merged.iloc[0:0]
     
@@ -449,6 +466,31 @@ def main_app():
         <strong>権限:</strong> {user_permission}
     </div>
     """, unsafe_allow_html=True)
+    
+    # 開発モード時のデバッグ情報
+    config = get_config()
+    if config["development_mode"] and user_permission in ["4. 承認者", "3. 利用者・承認者"]:
+        with st.expander("🔍 デバッグ情報（承認者マッチング）"):
+            st.write(f"**現在のユーザー名:** {current_user_fullname}")
+            st.write(f"**ログインID:** {user_info.get('ログインID', '')}")
+            
+            # 承認者として設定されているデータの確認
+            approval_matches = merged[
+                (merged["承認者"] == user_info.get('ログインID', '')) |
+                (merged["承認者"] == current_user_fullname) |
+                (merged["承認者フルネーム"] == current_user_fullname)
+            ]
+            
+            if len(approval_matches) > 0:
+                st.write(f"**承認対象者数:** {len(approval_matches)}名")
+                st.write("**承認対象者一覧:**")
+                debug_display = approval_matches[["社員番号", "名前", "承認者", "承認者フルネーム"]].head(10)
+                st.dataframe(debug_display)
+            else:
+                st.write("**承認対象者:** なし")
+                st.write("**確認項目:**")
+                st.write("- 勤怠データの「第一承認者」列にあなたの名前またはログインIDが設定されているか")
+                st.write("- 姓名の表記が一致しているか（姓名間のスペースなど）")
     
     # データ表示
     display_columns = [
