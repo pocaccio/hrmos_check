@@ -4,10 +4,6 @@ import pandas as pd
 import os
 import requests
 
-st.set_page_config(
-    layout="wide"
-)
-
 # Google関連のインポートをtry-exceptで囲む
 try:
     from google.oauth2 import service_account
@@ -300,9 +296,21 @@ def handle_authentication():
         auth_url = get_google_auth_url()
         if auth_url:
             st.markdown("#### Google アカウント認証")
-            # 同一タブでリダイレクトするボタンを作成
+            
+            # 方法1: ボタンクリックでリダイレクト
             if st.button("🔐 Googleアカウントでログイン", type="primary", use_container_width=True):
-                st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
+                # JavaScriptを使用したリダイレクト
+                redirect_js = f"""
+                <script>
+                    window.location.href = "{auth_url}";
+                </script>
+                """
+                st.markdown(redirect_js, unsafe_allow_html=True)
+                st.info("Googleログイン画面にリダイレクトしています...")
+            
+            # 方法2: 代替リンク（ボタンが動作しない場合）
+            st.markdown(f"**または**: [こちらをクリック]({auth_url})")
+            st.caption("↑ボタンが動作しない場合はこちらのリンクをクリックしてください")
             st.markdown("---")
     
     # 開発モード: ユーザー選択
@@ -405,9 +413,6 @@ def main_app():
     # UI
     st.markdown("""
     <style>
-        .block-container {
-            width: 90%;
-        }
         .user-info {
             background-color: #f0f2f6; padding: 1rem;
             border-radius: 0.5rem; margin-bottom: 1rem;
@@ -460,21 +465,8 @@ def main_app():
         st.markdown(f"<div class='header-box'>{permission_label}: {len(filtered)}名</div>", unsafe_allow_html=True)
         
         if available_columns:
-            display_df = filtered[available_columns].copy()
-            
-            # 数値列の変換
-            for col in ["打刻ズレ", "勤怠マイナス分"]:
-                if col in display_df.columns:
-                    display_df[col] = pd.to_numeric(
-                        display_df[col].astype(str).str.replace("", "0").replace("-", "0"), 
-                        errors="coerce"
-                    ).fillna(0)
-            
-            # ソート
-            sort_cols = [col for col in ["勤怠マイナス分", "打刻ズレ"] if col in display_df.columns]
-            if sort_cols:
-                display_df = display_df.sort_values(by=sort_cols, ascending=True)
-            
+            # データをそのまま表示（一切の加工なし）
+            display_df = filtered[available_columns]
             st.dataframe(display_df, use_container_width=True)
         else:
             st.warning("表示可能な列が見つかりません。")
