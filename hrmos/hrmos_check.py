@@ -296,7 +296,9 @@ def handle_authentication():
         auth_url = get_google_auth_url()
         if auth_url:
             st.markdown("#### Google アカウント認証")
-            st.markdown(f"[🔐 Googleアカウントでログイン]({auth_url})")
+            # 同一タブでリダイレクトするボタンを作成
+            if st.button("🔐 Googleアカウントでログイン", type="primary", use_container_width=True):
+                st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
             st.markdown("---")
     
     # 開発モード: ユーザー選択
@@ -400,7 +402,7 @@ def main_app():
     st.markdown("""
     <style>
         .block-container {
-            width:90%;
+            width: 90%;
         }
         .user-info {
             background-color: #f0f2f6; padding: 1rem;
